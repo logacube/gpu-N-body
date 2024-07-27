@@ -1,0 +1,26 @@
+#version 450 core
+#extension GL_ARB_gpu_shader_int64 : enable
+#extension  GL_ARB_shader_atomic_counter_ops: enable
+
+layout (local_size_x = 32, local_size_y = 32, local_size_z = 1) in;
+
+uniform float phase;
+layout(std430, binding = 0) writeonly buffer positionBuffer
+{
+    vec3 position[];
+};
+void main() 
+{
+    uint particle_index = gl_GlobalInvocationID.x * gl_NumWorkGroups.y * gl_NumWorkGroups.z  * gl_WorkGroupSize.y * gl_WorkGroupSize.z + gl_GlobalInvocationID.y * gl_NumWorkGroups.z * gl_WorkGroupSize.z + gl_GlobalInvocationID.z;
+
+    //uint u = particle_index % u_res;
+    //uint v = (particle_index / u_res) % v_res;
+    //uint w = particle_index / (u_res * v_res);
+
+    float u = float(gl_GlobalInvocationID.x) / float(gl_NumWorkGroups.x * gl_WorkGroupSize.x);
+    float v = float(gl_GlobalInvocationID.y) / float(gl_NumWorkGroups.y * gl_WorkGroupSize.y);
+    float w = float(gl_GlobalInvocationID.z) / float(gl_NumWorkGroups.z);
+
+    position[particle_index] = vec3(0.45 * v *cos(u * 6.283), 0.25 * sin(v * 4.0 + phase), 0.45 * v * sin(u * 6.283));
+    
+}

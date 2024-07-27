@@ -1,0 +1,249 @@
+#version 450 core
+#extension GL_ARB_gpu_shader_int64 : enable
+#extension  GL_ARB_shader_atomic_counter_ops: enable
+
+#define EMPTY 0xffffffffu
+
+struct voxel {
+    uint first;
+    uint last;
+    float mass;
+    //in the future this should also have a mass and a vec3 COM
+};
+layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(std430, binding = 2) readonly buffer zCodeBuffer
+{
+    uint64_t zCode[];
+};
+
+layout(std430, binding = 3) buffer voxelBuffer
+{
+    voxel voxels[];
+};
+layout(binding = 0, offset = 0) uniform atomic_uint new_voxels;
+uniform uint recursion_level;
+uniform uint append_start;//the index of next voxel to be created
+uniform uint array_start;//the index of the first octree to be checked. indices are in terms of voxels, not bytes
+uniform uint invocation_limit;
+
+void branchless_split() {
+    int i = (1 > 2) ? 1 : 2;
+}
+
+void find_split(in uint index_a, in uint index_b, out uint left_a, out uint left_b, out uint right_a, out uint right_b, in uint bit) {
+    /*
+        premise:
+        this function no longer just finds a split, it take in an interval
+        and return two new interval. 2 numbers in, 4 numbers out.
+    
+        in the case below, all elements are in the positive x hemisphere
+        therefore when splitting it up, the left half will inherit the 
+        first index as both ends of its interval. the right half will default to
+        to the entire input span. EMPTY is a special index, probably uint max 
+        ~4 billion. the point it is a number which almost certainly wouldn't 
+        naturally occur, unless there were 4 billion points. it just means that 
+        there are no elements in the interval of that node
+        
+        
+        IDEA: use the unused 64th bit to indicate emptiness
+        [     0      1      2      3      4      5      6      7      8]
+        [100001 100101 101001 101110 110001 110101 110110 111001 111010] 
+                                    |
+                                    V
+        [ EMPTY  EMPTY] [     0      1      2      3      4      5      6      7      8]
+        [   N/A    N/A] [100001 100101 101001 101110 110001 110101 110110 111001 111010] 
+                                    |
+                                    V
+        [ EMPTY  EMPTY] [ EMPTY  EMPTY] [     0      1      2      3] [     4      5      6      7      8]
+        [   N/A    N/A] [   N/A    N/A] [100001 100101 101001 101110] [110001 110101 110110 111001 111010] 
+                                    |
+                                    V
+        [ EMPTY  EMPTY] [ EMPTY  EMPTY] [ EMPTY  EMPTY] [ EMPTY  EMPTY]  [     0      0] [     1      2      3] [     4      5      6] [     7      8]
+        [   N/A    N/A] [   N/A    N/A] [   N/A    N/A] [   N/A    N/A]  [100001 100001] [100101 101001 101110] [110001 110101 110110] [111001 111010] 
+        another example:
+
+        //recusion level is 1 in this example. so the last 3 bits ar the only ones of interest
+        [     0      1      2]
+        [101000 101010 101100]
+                                    |
+                                    V
+        [     0      1] [     2      2]
+        [101000 101010] [101100 101100]
+                                    |
+                                    V
+        [     0      0] [     1      1] [     2      2] [ EMPTY  EMPTY]  
+        [101000 101000] [101010 101010] [101100 101100] [   N/A    N/A]
+                                    |
+                                    V
+        [     0      0] [ EMPTY  EMPTY] [     1      1] [ EMPTY  EMPTY] [     2      2] [ EMPTY  EMPTY] [ EMPTY  EMPTY]    
+        [101000 101000] [   N/A    N/A] [101010 101010] [   N/A    N/A] [101100 101100] [   N/A    N/A] [   N/A    N/A]
+
+
+        the objective of this function might just be to find the index of the first
+        element which has 1 as the target bit
+    */
+    
+
+
+    //extract bit of interest
+    uint64_t bitmask = 0x0000000000000001ul << bit;
+    
+    uint split_guess = index_a;
+    uint shift = index_b - index_a;
+
+    //check for edge cases
+    if (index_a == index_b) {
+        if ((zCode[index_a] & bitmask) == bitmask) {
+            left_a = EMPTY;
+            left_b = EMPTY;
+            right_a = index_a;
+            right_b = index_b;
+            return;
+        }
+        else {
+            left_a = index_a;
+            left_b = index_b;
+            right_a = EMPTY;
+            right_b = EMPTY;
+            return;
+        }
+    }
+    if ((zCode[index_a] & bitmask) == bitmask) {
+        left_a = EMPTY;
+        left_b = EMPTY;
+        right_a = index_a;
+        right_b = index_b;
+        return;
+    }
+    if ((zCode[index_b] & bitmask) != bitmask) {
+        left_a = index_a;
+        left_b = index_b;
+        right_a = EMPTY;
+        right_b = EMPTY;
+        return;
+    }
+    int i = 0;
+    //from this point on it is guaranteed that there will be a split
+    while (shift > 1) {
+        //decrease step_size
+        shift = (1 + shift) >> 1;
+        uint new_guess = split_guess + shift;
+        //check if guess has target bit with value 1
+        if ((zCode[new_guess] & bitmask) == bitmask) {
+            //reject guess
+        }
+        else {
+            if (new_guess < index_b) {
+                //this feels bad. see if you can come up with
+                //a bindary search algoithm which does not overstep the upper bound
+                split_guess = new_guess;
+            }
+        }
+        //voxels[5 + i].first = shift;
+        //voxels[5 + i].last = int(((zCode[new_guess] >> bit) & 1));
+        i++;
+    }
+
+    left_a = index_a;
+    left_b = split_guess;
+    right_a = split_guess + 1;
+    right_b = index_b;
+
+    return;
+}
+void main() 
+{
+    uint index = gl_GlobalInvocationID.x * gl_NumWorkGroups.y * gl_NumWorkGroups.z + gl_GlobalInvocationID.y * gl_NumWorkGroups.z + gl_GlobalInvocationID.z;
+
+    if (index >= invocation_limit) {
+        return;
+    }
+    //looking to optimize this shit? I heard from a guy that it is ideal to have workgroups sizes that are multiples of 32 becuase of GPU architecture
+
+    //in case you decide to be an idiot again, modifying this variable will not change its value in the grand array ;)
+    voxel source_vox = voxels[array_start + index];
+
+
+    //check if this is a leaf node:
+    if (source_vox.first == source_vox.last) {
+        //this is a leaf node
+        voxels[array_start + index].first = 0;
+    }
+    else if (source_vox.last == EMPTY) {
+
+    }
+    else {
+        //this is not a leaf node, need to allocate 8 spaces in the octee node array
+        uint first_child_idx = atomicCounterAddARB(new_voxels, 8);
+        //uint intervals[8][2] = {{69, 69}, {69, 69}, {69, 69}, {69, 69}, {69, 69}, {69, 69}, {69, 69}, {69, 69}};
+        uint intervals[8][2] = {{0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}};
+
+        //x split
+        find_split(source_vox.first, source_vox.last, intervals[0][0], intervals[3][1], intervals[4][0], intervals[7][1], 62 - 3 * recursion_level);
+        
+        uint L = intervals[0][0];
+        uint R = intervals[3][1];
+        
+        //if (recursion_level == 0) {
+
+            //left y split
+            find_split(L, R, intervals[0][0], intervals[1][1], intervals[2][0], intervals[3][1], 61 - 3 * recursion_level);
+        
+            L = intervals[4][0];
+            R = intervals[7][1];
+            //right y split
+            find_split(L, R, intervals[4][0], intervals[5][1], intervals[6][0], intervals[7][1], 61 - 3 * recursion_level);
+
+            L = intervals[0][0];
+            R = intervals[1][1];
+            //left y left z split
+            find_split(L, R, intervals[0][0], intervals[0][1], intervals[1][0], intervals[1][1], 60 - 3 * recursion_level);
+
+            L = intervals[2][0];
+            R = intervals[3][1];
+            //left y right z split
+            find_split(L, R, intervals[2][0], intervals[2][1], intervals[3][0], intervals[3][1], 60 - 3 * recursion_level);
+
+            L = intervals[4][0];
+            R = intervals[5][1];
+            //right y left z split
+            find_split(L, R, intervals[4][0], intervals[4][1], intervals[5][0], intervals[5][1], 60 - 3 * recursion_level);
+
+            L = intervals[6][0];
+            R = intervals[7][1];
+            //right y right z split
+            find_split(L, R, intervals[6][0], intervals[6][1], intervals[7][0], intervals[7][1], 60 - 3 * recursion_level);
+        //}
+
+
+        voxels[append_start + first_child_idx].first = intervals[0][0];
+        voxels[append_start + first_child_idx].last = intervals[0][1];
+        
+        
+        voxels[append_start + first_child_idx + 1].first = intervals[1][0];
+        voxels[append_start + first_child_idx + 1].last = intervals[1][1];
+
+        voxels[append_start + first_child_idx + 2].first = intervals[2][0];
+        voxels[append_start + first_child_idx + 2].last = intervals[2][1];
+               
+        voxels[append_start + first_child_idx + 3].first = intervals[3][0];
+        voxels[append_start + first_child_idx + 3].last = intervals[3][1];
+               
+        voxels[append_start + first_child_idx + 4].first = intervals[4][0];
+        voxels[append_start + first_child_idx + 4].last = intervals[4][1];
+               
+        voxels[append_start + first_child_idx + 5].first = intervals[5][0];
+        voxels[append_start + first_child_idx + 5].last = intervals[5][1];
+               
+        voxels[append_start + first_child_idx + 6].first = intervals[6][0];
+        voxels[append_start + first_child_idx + 6].last = intervals[6][1];
+               
+        voxels[append_start + first_child_idx + 7].first = intervals[7][0];
+        voxels[append_start + first_child_idx + 7].last = intervals[7][1];
+        
+        voxels[array_start + index].first = append_start + first_child_idx;
+
+    }
+
+}

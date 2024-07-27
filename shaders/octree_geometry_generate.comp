@@ -1,0 +1,57 @@
+ #version 450 core
+#extension GL_ARB_gpu_shader_int64 : enable
+#extension  GL_ARB_shader_atomic_counter_ops: enable
+
+#define EMPTY 0xffffffffu
+vec3 parent_to_child[8] = {
+        vec3(-1.0, -1.0, -1.0),
+        vec3(1.0, -1.0, -1.0),
+        vec3(-1.0, 1.0, -1.0),
+        vec3(1.0, 1.0, -1.0),
+        vec3(-1.0, -1.0, 1.0),
+        vec3(1.0, -1.0, 1.0),
+        vec3(-1.0, 1.0, 1.0),
+        vec3(1.0, 1.0, 1.0)
+};
+struct voxel {
+    uint first;
+    uint last;
+    float mass;
+    //in the future this should also have a mass and a vec3 COM
+};
+layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+
+layout(std430, binding = 3) readonly buffer voxelBuffer
+{
+    voxel voxels[];
+};
+layout(std430, binding = 4) buffer nodeCenterBuffer
+{
+    vec4 centers[];
+};
+uniform float edge_size;
+uniform uint array_start;//the index of the first octree to be checked. indices are in terms of voxels, not bytes
+uniform uint invocation_limit;
+
+void main() 
+{
+    uint index = gl_GlobalInvocationID.x * gl_NumWorkGroups.y * gl_NumWorkGroups.z + gl_GlobalInvocationID.y * gl_NumWorkGroups.z + gl_GlobalInvocationID.z;
+    if (index >= invocation_limit) {
+        return;
+    }
+    //this position
+    vec3 this_pos = centers[array_start + index].xyz;
+
+    uint child_idx = voxels[array_start + index].first;
+    if (child_idx != 0 && child_idx != EMPTY) {
+        centers[child_idx] = vec4(this_pos + edge_size * parent_to_child[0],     edge_size);
+        centers[child_idx + 1] = vec4(this_pos + edge_size * parent_to_child[1], edge_size);
+        centers[child_idx + 2] = vec4(this_pos + edge_size * parent_to_child[2], edge_size);
+        centers[child_idx + 3] = vec4(this_pos + edge_size * parent_to_child[3], edge_size);
+        centers[child_idx + 4] = vec4(this_pos + edge_size * parent_to_child[4], edge_size);
+        centers[child_idx + 5] = vec4(this_pos + edge_size * parent_to_child[5], edge_size);
+        centers[child_idx + 6] = vec4(this_pos + edge_size * parent_to_child[6], edge_size);
+        centers[child_idx + 7] = vec4(this_pos + edge_size * parent_to_child[7], edge_size);
+    }
+}

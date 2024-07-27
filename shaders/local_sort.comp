@@ -1,0 +1,72 @@
+#version 450 core
+#extension GL_ARB_gpu_shader_int64 : enable
+#extension  GL_ARB_shader_atomic_counter_ops: enable
+
+#define sort_section 0
+#define disperse_section 1
+#define group_size 1024
+
+//instead of having two compute shaders, just switch between the grouping and 
+//dispersing algorithms inside the shader. since all fragments will make the same 
+//decision it shouldn't slow down much. if it is too slow, you can always split it up later
+uniform uint algorithm;
+layout (local_size_x = 1024, local_size_y = 1, local_size_z = 1) in;
+
+layout(std430, binding = 2) buffer zCodeBuffer
+{
+    uint64_t zCode[];
+};
+
+shared uint64_t local_value[gl_WorkGroupSize.x * 2];
+void swap(uint indexA, uint indexB) {
+    if (local_value[indexA] > local_value[indexB]) {
+        uint64_t buff = local_value[indexA];
+        local_value[indexA] = local_value[indexB];
+        local_value[indexB] = buff;
+    }
+}
+void group(uint section_width) {
+    uint group_bottom = section_width * (2 * gl_LocalInvocationID.x / section_width);
+    uint first_element  = group_bottom + (gl_LocalInvocationID.x % (section_width / 2));
+    uint second_element = group_bottom + section_width - 1 - (gl_LocalInvocationID.x % (section_width / 2));
+    swap(first_element, second_element);
+}
+void slide(uint section_width) {
+    uint group_bottom = section_width * (2 * gl_LocalInvocationID.x / section_width);
+    uint first_element =  group_bottom + (gl_LocalInvocationID.x % (section_width / 2));
+    uint second_element = group_bottom + (gl_LocalInvocationID.x % (section_width / 2)) + (section_width / 2);
+    swap(first_element, second_element);
+}
+void local_sort() {
+    uint section_width = 2;
+    while (section_width <= group_size) {
+        //group
+        group(section_width);
+
+        uint slide_width = section_width / 2;
+        while (slide_width > 1) {
+            //slide
+            slide(slide_width);
+
+            slide_width /= 2;
+        }
+        section_width /= 2;
+    }
+}
+
+void main() 
+{
+    uint index = gl_GlobalInvocationID.x;// * gl_NumWorkGroups.y * gl_NumWorkGroups.z + gl_GlobalInvocationID.y * gl_NumWorkGroups.z + gl_GlobalInvocationID.z;
+    
+    uint local_invoc = gl_LocalInvocationID.x;
+    local_value[2 * local_invoc] = zCode[2 * index];
+    local_value[2 * local_invoc + 1] = zCode[2 * index + 1];
+
+    if (algorithm == sort_section) {
+        local_sort();
+    }
+
+    zCode[2 * index] = local_value[2 * local_invoc];
+    zCode[2 * index + 1] = local_value[2 * local_invoc + 1];
+    //zCode[index] = second_element;
+}

@@ -1,0 +1,41 @@
+#version 450 core
+#extension GL_ARB_gpu_shader_int64 : enable
+#extension  GL_ARB_shader_atomic_counter_ops: enable
+
+uniform mat4 transformationMatrix;
+uniform vec3 camera;
+uniform layout(set = 0, binding = 0, rgba32f) restrict image2D OUTPUT_TEXTURE;
+uniform ivec2 resolution;
+layout (local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+struct voxel {
+    uint first;
+    uint last;
+    float mass;
+    //in the future this should also have a mass and a vec3 COM
+};
+
+layout(std430, binding = 0) buffer positionBuffer
+{
+    vec3 position[];
+};
+layout(std430, binding = 1) buffer velocityBuffer
+{
+    vec3 velocity[];
+};
+layout(std430, binding = 3) buffer voxelBuffer
+{
+    voxel voxels[];
+};
+void main() 
+{
+    uint particle_index = gl_GlobalInvocationID.x * gl_NumWorkGroups.y * gl_NumWorkGroups.z + gl_GlobalInvocationID.y * gl_NumWorkGroups.z + gl_GlobalInvocationID.z;
+    vec3 acceleration = vec3(0.0);
+
+    //do gravity math;
+
+    
+    //update velocity and position vectors
+    velocity[particle_index] += acceleration;
+    position[particle_index] += velocity[particle_index];
+    
+}

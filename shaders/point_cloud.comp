@@ -1,0 +1,23 @@
+#version 450 core
+#extension GL_ARB_gpu_shader_int64 : enable
+#extension  GL_ARB_shader_atomic_counter_ops: enable
+
+uniform mat4 transformationMatrix;
+uniform vec3 camera;
+uniform layout(set = 0, binding = 0, rgba32f) restrict image2D OUTPUT_TEXTURE;
+uniform ivec2 resolution;
+layout (local_size_x = 1024, local_size_y = 1, local_size_z = 1) in;
+
+layout(std430, binding = 0) readonly buffer positionBuffer
+{
+    vec3 position[];
+};
+
+void main() 
+{
+    uint index = gl_GlobalInvocationID.x * gl_NumWorkGroups.y * gl_NumWorkGroups.z + gl_GlobalInvocationID.y * gl_NumWorkGroups.z + gl_GlobalInvocationID.z;
+
+	vec4 pos = transformationMatrix * vec4(position[index] - camera, 1.0);
+    
+    imageStore(OUTPUT_TEXTURE, ivec2(0.5 * (resolution.x * (pos.x / pos.w + 1.0)), 0.5 * (resolution.y * (pos.y / pos.w + 1.0))),vec4(1.0,1.0,1.0,1.0));
+}

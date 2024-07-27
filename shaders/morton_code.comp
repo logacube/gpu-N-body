@@ -1,0 +1,71 @@
+#version 450 core
+#extension GL_ARB_gpu_shader_int64 : enable
+#extension  GL_ARB_shader_atomic_counter_ops: enable
+
+layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(std430, binding = 0) readonly buffer positionBuffer
+{
+    vec3 position[];
+};
+layout(std430, binding = 2) writeonly buffer zCodeBuffer
+{
+    uint64_t zCode[];
+};
+vec3 morton_decode(uint64_t M) {
+    uint64_t x = M >> 2;
+    x = (x | x >> 2) &  0x10C30C86186430C3ul;
+    x = (x | x >> 4) &  0x01c03c0e01e0700ful;
+    x = (x | x >> 8) &  0x0001fc000fe0007ful;
+    x = (x | x >> 14) &  0x0001fc0000003ffful;
+    x = (x | x >> 28) &  0x00000000001ffffful;
+
+    uint64_t y = M >> 1;
+    y = (y | y >> 2) &  0x10C30C86186430C3ul;
+    y = (y | y >> 4) &  0x01c03c0e01e0700ful;
+    y = (y | y >> 8) &  0x0001fc000fe0007ful;
+    y = (y | y >> 14) &  0x0001fc0000003ffful;
+    y = (y | y >> 28) &  0x00000000001ffffful;
+
+    uint64_t z = M;
+    z = (z | z >> 2) &  0x10C30C86186430C3ul;
+    z = (z | z >> 4) &  0x01c03c0e01e0700ful;
+    z = (z | z >> 8) &  0x0001fc000fe0007ful;
+    z = (z | z >> 14) &  0x0001fc0000003ffful;
+    z = (z | z >> 28) &  0x00000000001ffffful;
+
+    return vec3(float(x) / 2097152 - 0.5, float(y) / 2097152 - 0.5, float(z) / 2097152 - 0.5);
+}
+uint64_t morton_code(float x_) {
+    //asumes x_ is in the range -0.5 to 0.5;
+    //converts to range 0.0 to 1.0
+    //becuase each float becomes only 21 bits, they need to be multiplies by 2^21 to make full use of the available mantissa
+    uint64_t x = uint64_t((x_ + 0.5) * 2097152) & 0x00000000001fffff;
+    
+
+    
+
+
+    x = (x | x << 28) & 0x0001fc0000003ffful;
+    x = (x | x << 14) & 0x0001fc000fe0007ful;
+    x = (x | x << 8) &  0x01c03c0e01e0700ful;
+    x = (x | x << 4) &  0x10C30C86186430C3ul;
+    x = (x | x << 2) &  0x1249249249249249ul;
+    
+    return x;
+}
+void main() 
+{
+    uint index = gl_GlobalInvocationID.x;//(gl_GlobalInvocationID.x * gl_NumWorkGroups.y * gl_NumWorkGroups.z + gl_GlobalInvocationID.y * gl_NumWorkGroups.z + gl_GlobalInvocationID.z) * 64 + gl_LocalInvocationIndex;
+    uint64_t morton_x = morton_code(position[index].x);
+    uint64_t morton_y = morton_code(position[index].y);
+    uint64_t morton_z = morton_code(position[index].z);
+
+    //vec3 decode = morton_decode(morton_x * 4 + morton_y * 2 + morton_z);
+
+    //morton_x = morton_code(decode.x);
+    //morton_y = morton_code(decode.y);
+    //morton_z = morton_code(decode.z);
+
+    zCode[index] =  (morton_x * 4 + morton_y * 2 + morton_z);
+}

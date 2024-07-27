@@ -1,0 +1,115 @@
+#version 450 core
+#extension GL_ARB_gpu_shader_int64 : enable
+
+#define group_ 0
+#define slide_ 1
+#define local_sort_ 2
+#define local_big_slide_ 3
+//to make thing slightly easier, this index will start at 0
+uniform uint group_size;
+
+//instead of having two compute shaders, just switch between the grouping and 
+//dispersing algorithms inside the shader. since all fragments will make the same 
+//decision it shouldn't slow down much. if it is too slow, you can always split it up later
+uniform uint algorithm;
+layout (local_size_x = 1024, local_size_y = 1, local_size_z = 1) in;
+
+layout(std430, binding = 2) buffer zCodeBuffer
+{
+    uint64_t zCode[];
+};
+
+shared uint64_t local_value[gl_WorkGroupSize.x * 2];
+void swap_local(uint indexA, uint indexB) {
+    if (local_value[indexA] > local_value[indexB]) {
+        uint64_t buff = local_value[indexA];
+        local_value[indexA] = local_value[indexB];
+        local_value[indexB] = buff;
+    }
+}
+void swap(uint indexA, uint indexB) {
+    if (zCode[indexA] > zCode[indexB]) {
+        uint64_t buff = zCode[indexA];
+        zCode[indexA] = zCode[indexB];
+        zCode[indexB] = buff;
+    }
+}
+void local_group(uint section_width) {
+    barrier();
+    uint group_bottom = section_width * (2 * gl_LocalInvocationID.x / section_width);
+    uint first_element  = group_bottom + (gl_LocalInvocationID.x % (section_width / 2));
+    uint second_element = group_bottom + section_width - 1 - (gl_LocalInvocationID.x % (section_width / 2));
+    swap_local(first_element, second_element);
+}
+void local_slide(uint section_width) {
+    barrier();
+    uint group_bottom = section_width * (2 * gl_LocalInvocationID.x / section_width);
+    uint first_element =  group_bottom + (gl_LocalInvocationID.x % (section_width / 2));
+    uint second_element = group_bottom + (gl_LocalInvocationID.x % (section_width / 2)) + (section_width / 2);
+    swap_local(first_element, second_element);
+}
+void big_local_slide() {
+        uint slide_width = group_size;
+        while (slide_width > 1) {
+            //slide
+            local_slide(slide_width);
+
+            slide_width /= 2;
+        }
+        barrier();
+        zCode[2 * gl_GlobalInvocationID.x] = local_value[2 * gl_LocalInvocationID.x];
+        zCode[2 * gl_GlobalInvocationID.x + 1] = local_value[2 * gl_LocalInvocationID.x + 1];
+}
+void local_sort() {
+    uint section_width = 2;
+    while (section_width <= group_size) {
+        //group
+        local_group(section_width);
+
+        uint slide_width = section_width / 2;
+        while (slide_width > 1) {
+            //slide
+            local_slide(slide_width);
+
+            slide_width /= 2;
+        }
+        section_width *= 2;
+    }
+
+    barrier();
+    zCode[2 * gl_GlobalInvocationID.x] = local_value[2 * gl_LocalInvocationID.x];
+    zCode[2 * gl_GlobalInvocationID.x + 1] = local_value[2 * gl_LocalInvocationID.x + 1];
+}
+void group(uint section_width) {
+    uint group_bottom = section_width * (2 * gl_GlobalInvocationID.x / section_width);
+    uint first_element  = group_bottom + (gl_GlobalInvocationID.x % (section_width / 2));
+    uint second_element = group_bottom + group_size - 1 - (gl_GlobalInvocationID.x % (section_width / 2));
+    swap(first_element, second_element);
+}
+void slide(uint section_width) {
+    uint group_bottom = section_width * (2 * gl_GlobalInvocationID.x / section_width);
+    uint first_element =  group_bottom + (gl_GlobalInvocationID.x % (section_width / 2));
+    uint second_element = group_bottom + (gl_GlobalInvocationID.x % (section_width / 2)) + (section_width / 2);
+    swap(first_element, second_element);
+}
+void main() 
+{
+    switch (algorithm) {
+        case group_:
+            group(group_size);
+        break;
+        case slide_:
+            slide(group_size);
+        break;
+        case local_sort_:
+            local_value[2 * gl_LocalInvocationID.x] = zCode[2 * gl_GlobalInvocationID.x];
+            local_value[2 * gl_LocalInvocationID.x + 1] = zCode[2 * gl_GlobalInvocationID.x + 1];
+            local_sort();
+        break;
+        case local_big_slide_:
+            local_value[2 * gl_LocalInvocationID.x] = zCode[2 * gl_GlobalInvocationID.x];
+            local_value[2 * gl_LocalInvocationID.x + 1] = zCode[2 * gl_GlobalInvocationID.x + 1];
+            big_local_slide();
+        break;
+    }
+}

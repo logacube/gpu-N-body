@@ -1,0 +1,327 @@
+#version 450 core
+#extension GL_ARB_gpu_shader_int64 : enable
+#extension  GL_ARB_shader_atomic_counter_ops: enable
+
+#define EMPTY 0xffffffffu
+
+struct node {
+    vec3 minimum;
+    int child1;
+    vec3 maximum;
+    int child2;
+    vec4 COM;//4th component is mass
+};
+layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(std430, binding = 2) readonly buffer zCodeBuffer
+{
+    uint64_t zCode[];
+};
+
+layout(std430, binding = 5) buffer voxelBuffer
+{
+    //the number of internal nodes in the radix tree will be 1 less than the size of the zCode array
+    //leaf nodes will be referenced by the internal ones but they will be in separate arrays
+    node radix_tree[];
+};
+uniform uint invocation_limit;
+
+
+//given a range of nodes, find the index of the most significant bit which differs between them
+int MSB(int left, int right) {
+    if (left < 0 || right < 0 || left > invocation_limit || right > invocation_limit) {
+        return 100;
+    }
+    //this work a little differently than in the paper.
+    //It's not counting the number of shared bits. it is just the index of the MSB
+    return int(findMSB(zCode[left] ^ zCode[right]));
+}
+vec3 morton_decode(uint64_t M) {
+    uint64_t x = (M >> 2) & 0x1249249249249249ul;
+    x = (x | x >> 2) &  0x10C30C86186430C3ul;
+    x = (x | x >> 4) &  0x01c03c0e01e0700ful;
+    x = (x | x >> 8) &  0x0001fc000fe0007ful;
+    x = (x | x >> 14) &  0x0001fc0000003ffful;
+    x = (x | x >> 28) &  0x00000000001ffffful;
+
+    uint64_t y = (M >> 1) & 0x1249249249249249ul;
+    y = (y | y >> 2) &  0x10C30C86186430C3ul;
+    y = (y | y >> 4) &  0x01c03c0e01e0700ful;
+    y = (y | y >> 8) &  0x0001fc000fe0007ful;
+    y = (y | y >> 14) &  0x0001fc0000003ffful;
+    y = (y | y >> 28) &  0x00000000001ffffful;
+
+    uint64_t z = M & 0x1249249249249249ul;
+    z = (z | z >> 2) &  0x10C30C86186430C3ul;
+    z = (z | z >> 4) &  0x01c03c0e01e0700ful;
+    z = (z | z >> 8) &  0x0001fc000fe0007ful;
+    z = (z | z >> 14) &  0x0001fc0000003ffful;
+    z = (z | z >> 28) &  0x00000000001ffffful;
+
+    return vec3(float(x) / 2097152 - 0.5, float(y) / 2097152 - 0.5, float(z) / 2097152 - 0.5);
+}
+
+/*
+idea for allocating octree nodes at a per-level basis:
+
+while constructing the radix tree, if the number of shared bits is a multiple of 3 (including 0)
+then it will correspond to a unique octree node at that level.
+
+number in brackets are the common bits
+
+0000011 00 <------|         |        |       |      0
+                  |[0000]   |        |       |      |
+0000101 01 <------1         |        |       |      |
+                            |[000]   |       |      |
+0001000 02 <----------------2        |       |      |
+                                     |[00]   |      |
+0010000 03 <----------------3        |       |      |
+                            |[001]   |       |      |
+0011000 04 <------4         |        |       |      |
+                  |[0011]   |        |       |      |
+0011101 05 <--5   |         |        |       |      |
+              |   |         |        |       |      |
+0011110 06 <--|   |         |        6       |      |
+                                             |[0]   |
+0110110 07 <-------------------------7       |      |
+                                     |[01]   |      |
+0111110 08 <----------------8        |       |      |
+                            |[011]   |       |      |
+0111111 09 <----------------|        |       9      |
+                                                    | N/A
+1000000 10 <----------------|        |       10     |
+                            |[100]   |       |      |
+1000001 11 <----------------11       |       |      |
+                                     |[10]   |      |
+1010100 12 <------|         12       |       |      |
+                  |[10101]  |        |       |      |
+1010110 13 <------13        |        |       |      |
+                            |[101]   |       |      |
+1011101 14 <------14        |        |       |      |
+                  |[10111]  |        |       |      |
+1011101 15 <------|         |        15      |      |
+                                             |[1]   |
+1101011 16 <-------------------------16      |      |
+                                     |[11]   |      |
+1110011 17 <------|         17       |       |      |
+                  |[1110]   |[111]   |       |      |
+1110100 18 <------18        |        |       |      |
+                            |        |       |      |
+1111101 19 <----------------|        |       |      |
+*/
+void main() 
+{
+
+    /*the radix tree will be constructed in such a way that the indices of its
+    * children (2) will be at the split index and the split index +1. This 
+    * means that for the left node, its upper bound will correspond directly with
+    * it's index in the node array. For the right node, the lower bound.
+    *
+    * Becuase all internal nodes are being processed in parallel, it's not known
+    * whether this node is the root, or a left child or a right one. All we know 
+    * is that the (known) index of this node within the node array will correspond 
+    * to one of the ends of its bounds. To determine which is the case, the notion of
+    * the MSB can be used. For each internal node, there will be some number of bits
+    * for which the zCodes in the node's range will vary, and some number of bits which 
+    * they all share. Given any two zCodes, this number can
+    * be found by taking the XOR of the zCodes at and finding the most significant
+    * bit that is a 1. zCodes within the range of the node will have more bits in common
+    * with zCodes within the range compared to zCodes sibling or parent nodes. We also
+    * know that siblings are always next to each other. Therefore givien the index of 
+    * the current node, we can infer that zCodes (at least 1) on one side of the current
+    * node index will belong to it's siblings and the other will belong to this node.
+    * So by comparing the highest bit which differs between the zCode of the current node
+    * and its neighboring zCodes, we can infer that the neighbor with the smallest differing
+    * belongs to this node and therefore the "direction" (denoted d) from the start index of this node
+    * to its end will be sign(MSB(i, i - 1) - MSB(i, i + 1))
+    *
+    * The index of the zCode which is within the current node will be have the index
+    * i + d
+    * i - d will one of the bounds of this node's sole other sibling, even if that sibling is a leaf node
+    *
+    * To find the index of the other end of the range (denoted j), we need to find the last
+    * zCode in the direction d which has more than or the same number of differing bits between it and i
+    * than between i and it's neighbor (i - d). An upper bound for this is the 
+    * index of the first zCode in the direction d to have MSB(i, i + l * d) >= MSB(i, i - d)
+    * this can be found by taking an initial guess of 2 for l and increasing it by 
+    * a factor of 2 until it satisfies the above condition. Once an upper bound is
+    * found, a binary search can be used to find the actual index of interest
+    */
+    int i = int(gl_GlobalInvocationID.x * gl_NumWorkGroups.y * gl_NumWorkGroups.z + gl_GlobalInvocationID.y * gl_NumWorkGroups.z + gl_GlobalInvocationID.z);
+    if (i >= invocation_limit) {
+        return;
+    }
+
+    
+    //-1 if this is a left node (i is the upper bound), +1 if this is a right node (i is the lower bound)
+    int d = int(sign(MSB(i, i - 1) - MSB(i, i + 1)));
+
+    //MSB between this node and it's sibling:
+    int sibling_MSB = MSB(i, i - d);
+
+    //find upper limit on size of range (distance to the unknown bound)
+
+    //the lower limit on the upper limit is 2 becuase 1 would still be inside this node
+    int max_range = 2;
+    while (MSB(i, i + max_range * d) < sibling_MSB) {
+        max_range *= 2;
+    }
+
+    //use binary search to find the other bound
+    int range = 0;
+
+    //using find MSB on max_range to effectively find the base 2 logarithm
+    //and therefore the number of times max_range can be divided by 2
+    //the reason im subtracting 1 is because max range is obvisously too big
+    //but we know half of it is still small enough, so subtracting 1 power of 2 
+    //is neccesary 
+
+
+    for (int o = 1; o < findMSB(max_range) + 1; o++) {
+        if (MSB(i, i + (range + (max_range >> o)) * d) < sibling_MSB) {
+            range += max_range >> o;
+        }
+    }
+     
+    //get other bound
+    int j = i + d * range;
+
+    //find the true number of differing in this node bits by comparing the ends of the range
+    int this_MSB = MSB(i, j);
+
+    //find the split index using another binary search. this time the bounds are 
+    //known to be i and j, so no exponential estimation is required
+    int split = 0;
+
+
+    
+    //the (range + 1) effectively just makes the devision (which is being emulated by but shifting)
+    //round up simulating the ceil() of the result
+    int old = 0;
+    int q = 0;
+    for (int o = 1; o < findMSB(range); o++) {
+        q = MSB(i, i + (split + ((range + 1) >> o)) * d);
+        old = split;
+        if (MSB(i, i + (split + ((range + 1) >> o)) * d) < this_MSB) {
+            split += (range + 1) >> o;
+        }
+    }
+
+    //the reason min(d, 0) is here is because if the range is going "forward"
+    //then the split where it needs to be, but if it is backwards, the index needs
+    //to be shifted backwards by so that it has a 0 in the common MSB digit
+    int split_index = i + split * d + min(d, 0);
+        
+    //these should be modified when the leaf node part of the 
+    //node array is implemented. All this will really amount to
+    //is adding some constant to the child indices corresponding
+    //to where the index of the first leaf node next to the last internal node
+    radix_tree[i].minimum = morton_decode(zCode[min(i, j)]);
+    radix_tree[i].maximum = morton_decode(zCode[max(i, j)]);
+    radix_tree[i].child1 = split_index;
+    radix_tree[i].child2 = split_index + 1;
+
+
+    //finding bounding box by decoding morton codes of corners
+
+    /*
+        biwise manual research:
+
+        trying to add a gap of two 0 between each bit
+
+        //the "final bits" are also the masks for each step
+
+        start code:   0000000000000000000000000000000000000000000111111111111111111111
+        targed bits:  0000000000000000000000000000000000000000000111111100000000000000 1FC000
+        shifted bits: 0000000000000001111111000000000000000000000000000000000000000000 (x & 1FC000) << 28
+        shifted all:  0000000000000001111111111111111111110000000000000000000000000000 x << 28
+        final bits:   0000000000000001111111000000000000000000000000000011111111111111 1FC0000003FFF
+
+        start code:   0000000000000001111111000000000000000000000000000011111111111111
+        targed bits:  0000000000000000000000000000000000000000000000000011111110000000
+        shifted bits: 0000000000000000000000000000000000001111111000000000000000000000
+        shifted all:  0111111100000000000000000000000000001111111111111100000000000000 x << 14
+        final bits:   0000000000000001111111000000000000001111111000000000000001111111 1FC000FE0007F
+
+        start code:   0000000000000001111111000000000000001111111000000000000001111111
+        targed bits:  0000000000000001110000000000000000001110000000000000000001110000
+        shifted bits: 0000000111000000000000000000111000000000000000000111000000000000 x << 8
+        final bits:   0000000111000000001111000000111000000001111000000111000000001111 1C03C0E01E0700F
+        
+        start code:   0000000111000000001111000000111000000001111000000111000000001111
+        targed bits:  0000000100000000001100000000100000000001100000000100000000001100
+        shifted bits: 0001000000000011000000001000000000011000000001000000000011000000 x << 4
+        final bits:   0001000011000011000011001000011000011000011001000011000011000011 10C30C86186430C3
+       
+        start code:   0001000011000011000011001000011000011000011001000011000011000011
+        targed bits:  0000000010000010000010000000010000010000010000000010000010000010
+        shifted bits: 0000001000001000001000000001000001000001000000001000001000001000 x << 2
+        shifted all:  0100001100001100001100100001100001100001100100001100001100001100
+        final bits:   0001001001001001001001001001001001001001001001001001001001001001 1249249249249249
+        
+
+        0000000000000000000000000000000000000000000000000000000000000000
+
+        decode:
+        start code:   0001001001001001001001001001001001001001001001001001001001001001
+        targed bits:  0000001000001000001000000001000001000001000000001000001000001000
+        shifted bits: 0000000010000010000010000000010000010000010000000010000010000010 >> 2
+        shifted all:  0000010010010010010010010010010010010010010010010010010010010010 >> 2
+        final bits:   0001000011000011000011001000011000011000011001000011000011000011 10C30C86186430C3
+   
+        start code:   0001000011000011000011001000011000011000011001000011000011000011
+        targed bits:  0001000000000011000000001000000000011000000001000000000011000000
+        shifted bits: 0000000100000000001100000000100000000001100000000100000000001100 >> 4
+        final bits:   0000000111000000001111000000111000000001111000000111000000001111 1C03C0E01E0700F
+
+        start code:   0000000111000000001111000000111000000001111000000111000000001111
+        targed bits:  0000000111000000000000000000111000000000000000000111000000000000
+        shifted bits: 0000000000000001110000000000000000001110000000000000000001110000 >> 4
+        final bits:   0000000000000001111111000000000000001111111000000000000001111111 1FC000FE0007F
+    
+    
+
+    Binary tree to octree (fucking around and hopefully finding out): 
+
+0000011 00 <------|         |        |       |      0
+                  |[0000]   |        |       |      |
+0000101 01 <------1         |        |       |      |
+                            |[000]   |       |      |
+0001000 02 <----------------2        |       |      |
+                                     |[00]   |      |
+0010000 03 <----------------3        |       |      |
+                            |[001]   |       |      |
+0011000 04 <------4         |        |       |      |
+                  |[0011]   |        |       |      |
+0011101 05 <--5   |         |        |       |      |
+              |   |         |        |       |      |
+0011110 06 <--|   |         |        6       |      |
+                                             |[0]   |
+0110110 07 <-------------------------7       |      |
+                                     |[01]   |      |
+0111110 08 <----------------8        |       |      |
+                            |[011]   |       |      |
+0111111 09 <----------------|        |       9      |
+                                                    | N/A
+1000000 10 <----------------|        |       10     |
+                            |[100]   |       |      |
+1000001 11 <----------------11       |       |      |
+                                     |[10]   |      |
+1010100 12 <------|         12       |       |      |
+                  |[10101]  |        |       |      |
+1010110 13 <------13        |        |       |      |
+                            |[101]   |       |      |
+1011101 14 <------14        |        |       |      |
+                  |[10111]  |        |       |      |
+1011101 15 <------|         |        15      |      |
+                                             |[1]   |
+1101011 16 <-------------------------16      |      |
+                                     |[11]   |      |
+1110011 17 <------|         17       |       |      |
+                  |[1110]   |[111]   |       |      |
+1110100 18 <------18        |        |       |      |
+                            |        |       |      |
+1111101 19 <----------------|        |       |      |
+    
+    */
+}
