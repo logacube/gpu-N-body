@@ -1,4 +1,4 @@
-﻿#include "./include/glad/glad.h"
+#include "./include/glad/glad.h"
 #include "./include/GLFW/glfw3.h"
 //#include <GL/glew.h>
 
@@ -211,12 +211,55 @@ public:
         return sqrt(x * x + y * y + z * z + w * w);
     }
 };
+class ivec4 : public ivec2 {
+public:
+    int z = 0;
+    int w = 0;
+    ivec4() {};
+
+    ivec4(int x$, int y$, int z$, int w$) {
+        x = x$;
+        y = y$;
+        z = z$;
+        w = w$;
+    }
+    ivec4(int s) {
+        x = s;
+        y = s;
+        z = s;
+        w = s;
+    }
+    ivec4 operator+(ivec4 vec) {
+        return ivec4(x + vec.x, y + vec.y, z + vec.z, w + vec.w);
+    }
+    ivec4 operator-(ivec4 vec) {
+        return ivec4(x - vec.x, y - vec.y, z - vec.z, w - vec.w);
+    }
+    ivec4 operator*(int i) {
+        return ivec4(x * i, y * i, z * i, w * i);
+    }
+    void set(int x$, int y$, int z$, int w$) {
+        x = x$;
+        y = y$;
+        z = z$;
+        w = w$;
+    }
+    void copy(ivec2 vec) {
+        x = vec.x;
+        y = vec.y;
+    }
+    float length() {
+        return sqrt(float(x * x) + float(y * y));
+    }
+};
 struct kd_node {
-    vec3 minimum;
-    int first;
-    vec3 maximum;
-    int last;
-    vec4 COM;//4th component is mass
+    int child1;
+    int child2;
+    int parent;
+    int flag;
+    vec4 COM;
+    vec4 minimum;
+    vec4 maximum;
 };
 class uniform {
 public:
@@ -243,8 +286,8 @@ public:
     shader(const char* vertex_path, const char* fragment_path) {
         FILE* vertex_file;
         FILE* fragment_file;
-        int length_of_vertex_shader = 0;
-        int length_of_fragment_shader = 0;
+        int length_of_vertex_shader = 1;
+        int length_of_fragment_shader = 1;
 
         char* vertex_string;
         char* fragment_string;
@@ -401,9 +444,9 @@ public:
         FILE* vertex_file;
         FILE* geometry_file;
         FILE* fragment_file;
-        int length_of_vertex_shader = 0;
-        int length_of_geometry_shader = 0;
-        int length_of_fragment_shader = 0;
+        int length_of_vertex_shader = 1;
+        int length_of_geometry_shader = 1;
+        int length_of_fragment_shader = 1;
 
         char* vertex_string;
         char* fragment_string;
@@ -635,7 +678,7 @@ public:
             }
         }
         else {
-            printf("uniform not \"%s\" found\n", name);
+            printf("uniform \"%s\" not found\n", name);
         }
     }
     void update_uniform_ivec2(int x, int y, const char* name) {
@@ -655,7 +698,7 @@ public:
             }
         }
         else {
-            printf("uniform not \"%s\" found\n", name);
+            printf("uniform \"%s\" not found\n", name);
         }
     }
     void update_uniform_vec3(vec3 data, const char* name) {
@@ -677,7 +720,7 @@ public:
             }
         }
         else {
-            printf("uniform not \"%s\" found\n", name);
+            printf("uniform \"%s\" not found\n", name);
         }
     }
     void update_uniform_float(float data, const char* name) {
@@ -699,7 +742,7 @@ public:
             }
         }
         else {
-            printf("uniform not \"%s\" found", name);
+            printf("uniform \"%s\" not found\n", name);
             printf("%d\n", num_uniforms);
         }
     }
@@ -722,7 +765,7 @@ public:
             //}
         }
         else {
-            printf("uniform not \"%s\" found", name);
+            printf("uniform \"%s\" not found\n", name);
             printf("%d\n", num_uniforms);
         }
     }
@@ -745,7 +788,7 @@ public:
             //}
         }
         else {
-            printf("uniform not \"%s\" found", name);
+            printf("uniform \"%s\" not found\n", name);
             printf("%d\n", num_uniforms);
         }
     }
@@ -768,7 +811,7 @@ public:
             //}
         }
         else {
-            printf("uniform not \"%s\" found", name);
+            printf("uniform \"%s\" not found\n", name);
             printf("%d\n", num_uniforms);
         }
     }
@@ -782,7 +825,7 @@ public:
 
     compute_shader(const char* source_path) {
         FILE* source_file;
-        int length_of_shader = 0;
+        int length_of_shader = 1;
 
         char* shader_string;
 
@@ -907,7 +950,7 @@ public:
             }
         }
         else {
-            printf("uniform not \"%s\" found\n", name);
+            printf("uniform \"%s\" not found\n", name);
         }
     }
     void update_uniform_ivec2(int x, int y, const char* name) {
@@ -927,7 +970,7 @@ public:
             }
         }
         else {
-            printf("uniform not \"%s\" found\n", name);
+            printf("uniform \"%s\" not found\n", name);
         }
     }
     void update_uniform_vec3(vec3 data, const char* name) {
@@ -949,7 +992,7 @@ public:
             }
         }
         else {
-            printf("uniform not \"%s\" found\n", name);
+            printf("uniform \"%s\" not found\n", name);
         }
     }
     void update_uniform_float(float data, const char* name) {
@@ -971,7 +1014,7 @@ public:
             }
         }
         else {
-            printf("uniform not \"%s\" found", name);
+            printf("uniform \"%s\" not found\n", name);
             printf("%d\n", num_uniforms);
         }
     }
@@ -994,12 +1037,13 @@ public:
             //}
         }
         else {
-            printf("uniform not \"%s\" found", name);
+            printf("uniform \"%s\" not found\n", name);
             printf("%d\n", num_uniforms);
         }
     }
     void update_uniform_uint(unsigned int data, const char* name) {
         uniform* target_uniform = NULL;
+
         for (int i = 0; i < num_uniforms; i++) {
             //printf("comparison: %s, \t%s\n", name, uniforms[i].name);
 
@@ -1017,7 +1061,7 @@ public:
             //}
         }
         else {
-            printf("uniform not \"%s\" found", name);
+            printf("uniform \"%s\" not found\n", name);
             printf("%d\n", num_uniforms);
         }
     }
@@ -1040,7 +1084,7 @@ public:
             //}
         }
         else {
-            printf("uniform not \"%s\" found", name);
+            printf("uniform \"%s\" not found\n", name);
             printf("%d\n", num_uniforms);
         }
     }
@@ -1072,6 +1116,9 @@ public:
         }
         if (type == GL_UNSIGNED_INT64_ARB || type == GL_INT64_ARB) {
             size = 8;
+        }
+        if (type == GL_DOUBLE_VEC4) {
+            size = 32;
         }
         if (type == NAGOL_VOX) {
             size = 12;
@@ -1113,6 +1160,24 @@ public:
     }
     void set_data(unsigned int length, void* data) {
         glNamedBufferSubData(ID, 0, length * data_size, data);
+        //glBindBuffer(GL_SHADER_STORAGE_BUFFER, ID);
+        //glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, data_size * length, data);
+        //glBindBufferBase(GL_SHADER_STORAGE_BUFFER, binding, ID);
+
+        //unbind buffer so that it does not cause issue with other shaders
+        //glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+    }
+    void sub_data(unsigned int length, unsigned int start, void* data) {
+        glNamedBufferSubData(ID, start * data_size, length * data_size, data);
+        //glBindBuffer(GL_SHADER_STORAGE_BUFFER, ID);
+        //glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, data_size * length, data);
+        //glBindBufferBase(GL_SHADER_STORAGE_BUFFER, binding, ID);
+
+        //unbind buffer so that it does not cause issue with other shaders
+        //glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+    }
+    void get_sub_data(unsigned int length, unsigned int start, void* data) {
+        glGetNamedBufferSubData(ID, start * data_size, length * data_size, data);
         //glBindBuffer(GL_SHADER_STORAGE_BUFFER, ID);
         //glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, data_size * length, data);
         //glBindBufferBase(GL_SHADER_STORAGE_BUFFER, binding, ID);
@@ -1189,8 +1254,8 @@ public:
         if (dataType == GL_FLOAT_VEC4) {
             vec4* tempData = new vec4[length];
             glGetNamedBufferSubData(ID, 0, length * sizeof(vec4), tempData);
-            for (int i = 0; i < length; i++) {
-                printf("(%f, %f, %f, %f) ", tempData[i].x, tempData[i].y, tempData[i].z, tempData[i].w);
+            for (int i = 0; i < 100; i++) {
+                printf("(%f, %f, %f, %f) \n", tempData[i].x, tempData[i].y, tempData[i].z, tempData[i].w);
             }
             printf("\n");
             delete[] tempData;
@@ -1213,7 +1278,7 @@ public:
             //glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, length * sizeof(unsigned long long int), tempData);
             //glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
             for (int i = 0; i < length; i++) {
-                //printf("%lld ", tempData[i]);
+                printf("%d\t", i);
                 for (int bit = 62; bit >= 0; bit--) {
                     printf("%d", (tempData[i] >> bit) & 1);
                 }
@@ -1241,14 +1306,27 @@ public:
             delete[] tempData;
         }
         if (dataType == NAGOL_KD) {
+            const char* colors[] = {
+                "\033[33m",//yellow
+                "\033[34m",//blue
+                "\033[35m",//purple
+                "\033[31m",//red
+                "\033[32m", //green
+                "\033[37m" //white
+            };
             kd_node* tempData = new kd_node[length];
             glGetNamedBufferSubData(ID, 0, length * sizeof(kd_node), tempData);
+            int k = 0;
             for (int i = 0; i < length; i++) {
-                printf("{%d %d <%.2f, %.2f, %.2f> <%.2f, %.2f, %.2f> <%.2f, %.2f, %.2f, %.2f>}, ", tempData[i].first, tempData[i].last, tempData[i].minimum.x, tempData[i].minimum.y, tempData[i].minimum.z, tempData[i].maximum.x, tempData[i].maximum.y, tempData[i].maximum.z, tempData[i].COM.x, tempData[i].COM.y, tempData[i].COM.z, tempData[i].COM.w);
+                int parent_col = 5;
+                if (tempData[i].parent == 0) {
+                    k++;
+                    parent_col = 3;
+                }
+                printf("{%d %d %s%d%s %d %.3f}, ", tempData[i].child1, tempData[i].child2, colors[parent_col], tempData[i].parent, colors[5], tempData[i].flag, tempData[i].COM.w);
 
             }
-
-
+            printf("\n%d\n\n", k);
             printf("\n");
             delete[] tempData;
         }
@@ -1672,34 +1750,33 @@ public:
     GPU_BUFFER position_buffer;
     GPU_BUFFER velocity_buffer;
     GPU_BUFFER zCode_buffer;
-    GPU_BUFFER node_buffer;
-    GPU_BUFFER octree_structure_buffer;
+    GPU_BUFFER COM_buffer;
     GPU_BUFFER kd_tree;
 
-    atomic_counter* new_node_counter;
-
     compute_shader* zCode_compute;
+    compute_shader* morton_decode_compute;
     compute_shader* sort_compute;
-    compute_shader* octree_compute;
-    compute_shader* geometry_generator;
+    compute_shader* prefix_sum_compute;
     compute_shader* kd_tree_compute;
+    compute_shader* barnes_hut_compute;
 
-    N_BODY_SIM(unsigned int num_particles, float mass, compute_shader* zCode_comp, compute_shader* sort_comp, compute_shader* octree_comp, compute_shader* geometry_gen, compute_shader* kd_build, atomic_counter* counter) {
+    N_BODY_SIM(unsigned int num_particles, float mass, compute_shader* zCode_comp, compute_shader* morton_decode, compute_shader* sort_comp, compute_shader* prefix_sum, compute_shader* kd_build, compute_shader* barnes_hut) {
         //add something here to force num_particles to be a power of 2
         particle_count = num_particles;
         particle_mass = mass;
         position_buffer = GPU_BUFFER(GL_FLOAT_VEC4, num_particles, NULL);
         velocity_buffer = GPU_BUFFER(GL_FLOAT_VEC4, num_particles, NULL);
         zCode_buffer = GPU_BUFFER(GL_UNSIGNED_INT64_ARB, num_particles, NULL);
-        node_buffer = GPU_BUFFER(NAGOL_VOX, num_particles * 6, NULL);
-        octree_structure_buffer = GPU_BUFFER(GL_FLOAT_VEC4, num_particles * 6, NULL);
-        kd_tree = GPU_BUFFER(NAGOL_KD, num_particles - 1, NULL);
-        zCode_compute = zCode_comp;
+        //to avoid reading and writing conflicts, the parallel prefix sum\
+        //needs to buffers, so instead of making 2, we just have one long buffer
+        COM_buffer = GPU_BUFFER(GL_FLOAT_VEC4, num_particles * 2, NULL);
+        kd_tree = GPU_BUFFER(NAGOL_KD, 2 * num_particles - 1, NULL);
         sort_compute = sort_comp;
-        octree_compute = octree_comp;
-        geometry_generator = geometry_gen;
+        zCode_compute = zCode_comp;
+        morton_decode_compute = morton_decode;
+        prefix_sum_compute = prefix_sum;
         kd_tree_compute = kd_build;
-        new_node_counter = counter;
+        barnes_hut_compute = barnes_hut;
         initial_particle_positions = new vec4[particle_count];
         initial_particle_velocities = new vec4[particle_count];
 
@@ -1722,20 +1799,15 @@ public:
         position_buffer.set_data(particle_count, initial_particle_positions);
 
     }
-    int compute_cycle() {
-        glClearNamedBufferData(octree_structure_buffer.ID, GL_R32F, GL_RED, GL_FLOAT, NULL);
+    void compute_cycle() {
+
+
         position_buffer.bind(GL_SHADER_STORAGE_BUFFER, 0);
         velocity_buffer.bind(GL_SHADER_STORAGE_BUFFER, 1);
         zCode_buffer.bind(GL_SHADER_STORAGE_BUFFER, 2);
-        node_buffer.bind(GL_SHADER_STORAGE_BUFFER, 3);
-        octree_structure_buffer.bind(GL_SHADER_STORAGE_BUFFER, 4);
+        COM_buffer.bind(GL_SHADER_STORAGE_BUFFER, 3);
         kd_tree.bind(GL_SHADER_STORAGE_BUFFER, 5);
 
-
-        voxel root = { 0, particle_count - 1, particle_mass };
-        node_buffer.set_data(1, &root);
-        vec4 root_pos(0.0, 0.0, 0.0, 0.5);
-        octree_structure_buffer.set_data(1, &root_pos);
         const char clear[] = "\033[0m";
         const char* colors[] = {
             "\033[33m",//yellow
@@ -1746,7 +1818,6 @@ public:
         };
         printf("starting\n");
         int debug = 0;
-        int generate_geometry = 1;
         if (debug) {
             position_buffer.print();
         }
@@ -1761,13 +1832,14 @@ public:
         //sort z-codes
         glMemoryBarrier(GL_ALL_BARRIER_BITS);
         //there will walways be half as many shader invocations as there are elements in the array being sorted
-        //if (group_size == 1024) {
-        sort_compute->update_uniform_uint(1024, "group_size");
-        sort_compute->update_uniform_uint(2, "algorithm");
-        sort_compute->compute((particle_count / 2) / 1024, 1, 1);
+        int group_size = 2;
 
-        //}
-        int group_size = 2048;
+        if (particle_count >= 2048) {
+            sort_compute->update_uniform_uint(1024, "group_size");
+            sort_compute->update_uniform_uint(2, "algorithm");
+            sort_compute->compute((particle_count / 2) / 1024, 1, 1);
+            group_size = 2048;
+        }
 
         while (group_size <= particle_count) {
             glMemoryBarrier(GL_ALL_BARRIER_BITS);
@@ -1779,7 +1851,7 @@ public:
 
             int slide_size = group_size / 2;
             while (slide_size > 1) {
-                //glMemoryBarrier(GL_ALL_BARRIER_BITS);
+                glMemoryBarrier(GL_ALL_BARRIER_BITS);
 
                 if (slide_size == 1024) {
                     sort_compute->update_uniform_uint(slide_size, "group_size");
@@ -1803,121 +1875,54 @@ public:
         printf("z code sorting %scomplete%s\n", colors[4], clear);
         glMemoryBarrier(GL_ALL_BARRIER_BITS);
 
-        
+
+        morton_decode_compute->compute(particle_count / 64, 1, 1);
+        if (debug) {
+            COM_buffer.print();
+        }
+        //vec4 first_val;
+        //COM_buffer.get_sub_data(1, 0, &first_val);
+        //COM_buffer.sub_data(1, particle_count, &first_val);
+
+        glMemoryBarrier(GL_ALL_BARRIER_BITS);
+
+        int steps = int(log2(particle_count));
+        for (int i = 0; i < steps; i++) {
+            glMemoryBarrier(GL_ALL_BARRIER_BITS);
+
+            prefix_sum_compute->update_uniform_uint(1 << i, "shift");
+            prefix_sum_compute->update_uniform_uint(particle_count * (1 - (i % 2)), "write_shift");
+            prefix_sum_compute->update_uniform_uint(particle_count * (i % 2), "read_shift");
+            prefix_sum_compute->update_uniform_uint(particle_count, "invocation_limit");
+            prefix_sum_compute->compute(1 + (particle_count) / 1024, 1, 1);
+        }
+
+        glMemoryBarrier(GL_ALL_BARRIER_BITS);
+        if (debug) {
+            COM_buffer.print();
+        }
+        printf("Center of mass calculations %scomplete%s\n", colors[4], clear);
+
+        kd_tree_compute->update_uniform_int(particle_count - 1, "leaf_node_offset");
         kd_tree_compute->update_uniform_uint(particle_count - 1, "invocation_limit");
         kd_tree_compute->compute(1 + (particle_count - 1) / 64, 1, 1);
         //kd_tree.print();
-        
-        //generate octree
-        const unsigned int max_recursion = 20;
-        unsigned int recursion_level = 0;
-        unsigned int array_start = 0;//the index of the first octree node to be potentially subdivided
-        unsigned int append_start = 1;//the index of where new child nodes can be added
-        unsigned int new_voxels = 1;
-        float edge_size = 0.25;
-        /*
-        while (recursion_level < max_recursion && new_voxels > 0) {
-            octree_compute->update_uniform_uint(recursion_level, "recursion_level");
-            octree_compute->update_uniform_uint(array_start, "array_start");
-            octree_compute->update_uniform_uint(append_start, "append_start");
-            octree_compute->update_uniform_uint(new_voxels, "invocation_limit");
-            octree_compute->compute(1 + new_voxels / 64, 1, 1);
+        //velocity_buffer.print();
+        printf("tree construction %scomplete%s\n", colors[4], clear);
 
-            glMemoryBarrier(GL_ALL_BARRIER_BITS);
+        glMemoryBarrier(GL_ALL_BARRIER_BITS);
+        barnes_hut_compute->update_uniform_uint(particle_count - 1, "leaf_node_offset");
+        barnes_hut_compute->compute(particle_count / 64, 1, 1);
+        vec4 zero = vec4(0.0, 0.0, 0.0, 0.0);
+        //position_buffer.sub_data(1, 0, &zero);
+        //barnes_hut_compute->compute(1, 1, 1);
 
-            geometry_generator->update_uniform_float(edge_size, "edge_size");
-            geometry_generator->update_uniform_uint(array_start, "array_start");
-            geometry_generator->update_uniform_uint(new_voxels, "invocation_limit");
-            geometry_generator->compute(1 + new_voxels / 64, 1, 1);
-
-            array_start += new_voxels;
-            glFinish();
-
-            new_voxels = new_node_counter->swap_value(0);
-            append_start += new_voxels;
-            recursion_level++;
-            if (debug) {
-                printf("new voxels: %d\n", new_voxels);
-            }
-            edge_size *= 0.5;
-        }
-        */
-        unsigned int node_count = append_start;
-
-        printf("max node: %d total node: %u\n", node_buffer.length, node_count);
-
-        if (debug) {
-            printf("total node: %u\n", node_count);
-            node_buffer.print();
-
-        }
-        //octree_structure_buffer.print();
-        printf("octree construction %scomplete%s\n", colors[4], clear);
-        return node_count;
-    }
-    void test_sort() {
-        int group_size = 2048;
-
-        while (group_size <= particle_count) {
-
-            sort_compute->update_uniform_uint(group_size, "group_size");
-            sort_compute->update_uniform_uint(0, "algorithm");
-            sort_compute->compute((particle_count / 2) / 1024, 1, 1);
-            //glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
-
-            int slide_size = group_size / 2;
-            while (slide_size > 1) {
-
-                if (slide_size == 1024) {
-                    sort_compute->update_uniform_uint(slide_size, "group_size");
-                    sort_compute->update_uniform_uint(3, "algorithm");
-                    sort_compute->compute((particle_count / 2) / 1024, 1, 1);
-                    break;
-                }
-
-                sort_compute->update_uniform_uint(slide_size, "group_size");
-                sort_compute->update_uniform_uint(1, "algorithm");
-                sort_compute->compute((particle_count / 2) / 1024, 1, 1);
-                //glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
-                slide_size /= 2;
-            }
-            group_size *= 2;
-
-        }
-        printf("sorted\n");
+        //position_buffer.print();
+        //velocity_buffer.print();
         glFinish();
-    }
-    void test_build() {
-        voxel root = { 0, particle_count - 1, particle_mass };
-        node_buffer.set_data(1, &root);
-        const unsigned int max_recursion = 20;
-        unsigned int recursion_level = 0;
-        unsigned int array_start = 0;//the index of the first octree node to be potentially subdivided
-        unsigned int append_start = 1;//the index of where new child nodes can be added
-        unsigned int new_voxels = 1;
-        float edge_size = 0.25;
+        //position_buffer.print();
+        printf("Gravity calculations %scomplete%s\n", colors[4], clear);
 
-        while (recursion_level < max_recursion && new_voxels > 0) {
-            octree_compute->update_uniform_uint(recursion_level, "recursion_level");
-            octree_compute->update_uniform_uint(array_start, "array_start");
-            octree_compute->update_uniform_uint(append_start, "append_start");
-            octree_compute->update_uniform_uint(new_voxels, "invocation_limit");
-            octree_compute->compute(1 + new_voxels / 64, 1, 1);
-            geometry_generator->update_uniform_float(edge_size, "edge_size");
-            geometry_generator->update_uniform_uint(array_start, "array_start");
-            geometry_generator->update_uniform_uint(new_voxels, "invocation_limit");
-            geometry_generator->compute(1 + new_voxels / 64, 1, 1);
-
-            array_start += new_voxels;
-            glFinish();
-
-            new_voxels = new_node_counter->swap_value(0);
-            append_start += new_voxels;
-            recursion_level++;
-
-            edge_size *= 0.5;
-        }
-        printf("done building\n");
     }
 };
 //END OF CLASS & TYPE DEFINITIONS
@@ -1930,7 +1935,7 @@ int scrollPosition = 0;
 vec2 mousePosition;
 vec2 clickPosition;//this is the position of the last mouse down event to occur
 vec3 cameraPosition = vec3(0.0, 0.0, 0.0);//pretty obvious what this is
-vec3 cameraPositionSpherical = vec3(0.0, 1.57 - 0.3, 1.0);//x: theta, y: phi, z: rho
+vec3 cameraPositionSpherical = vec3(0.0, 1.57, 1.0);//x: theta, y: phi, z: rho
 vec3 globalUp = vec3(0.0, 1.0, 0.0);
 vec3 forward = vec3(0.0, 0.0, 1.0);
 vec3 right = vec3(1.0, 0.0, 0.0);
@@ -1976,142 +1981,6 @@ vec3 octree_vertices[18] = {
     vec3(-1.0, -1.0, 0.0),
     vec3(0.0, -1.0, 1.0)
 };
-int octree_indices[30] = {
-    8, 9,
-    2, 15,
-    11, 6,
-    1, 3,
-    3, 16,
-    16, 14,
-    14, 1,
-    0, 4,
-    7, 12,
-    13, 17,
-    5, 10,
-    0, 13,
-    5, 7,
-    4, 17,
-    10, 12
-
-};
-class octree {
-public:
-    float mass = 0.0;
-    vec3 COM;
-    octree** children;
-
-    octree(float* points, int* indices, int index_count, vec3 min, vec3 max, float edge, int level) {
-        //iterate through the array of points and chech which ones are inside the volume
-        int* new_indices = new int[index_count];
-        int new_index_count = 0;
-        int recursion_limit = 10;
-        for (int i = 0; i < index_count; i++) {
-            //printf("%d %.2f %d\t%.2f, %.2f, %.2f\t %.2f, %.2f, %.2f\t %.2f, %.2f, %.2f\n", i, edge, index_count, min.x, min.y, min.z, max.x, max.y, max.z);
-            int index = indices[i];
-            if (points[index] > min.x && points[index] < max.x) {
-                if (points[index + 1] > min.y && points[index + 1] < max.y) {
-                    if (points[index + 2] > min.z && points[index + 2] < max.z) {
-                        new_indices[new_index_count++] = index;
-                    }
-                }
-            }
-        }
-        mass += new_index_count * 1.0e1;
-        if (new_index_count > 1 && level < recursion_limit) {
-            //printf("\tmaking new nodes\n");
-            children = new octree * [8];
-
-            edge *= 0.5;
-
-            children[0] = new octree(points, new_indices, new_index_count, min + parent_to_child[0][0] * edge, max + parent_to_child[0][1] * edge, edge, level + 1);
-            children[1] = new octree(points, new_indices, new_index_count, min + parent_to_child[1][0] * edge, max + parent_to_child[1][1] * edge, edge, level + 1);
-            children[2] = new octree(points, new_indices, new_index_count, min + parent_to_child[2][0] * edge, max + parent_to_child[2][1] * edge, edge, level + 1);
-            children[3] = new octree(points, new_indices, new_index_count, min + parent_to_child[3][0] * edge, max + parent_to_child[3][1] * edge, edge, level + 1);
-            children[4] = new octree(points, new_indices, new_index_count, min + parent_to_child[4][0] * edge, max + parent_to_child[4][1] * edge, edge, level + 1);
-            children[5] = new octree(points, new_indices, new_index_count, min + parent_to_child[5][0] * edge, max + parent_to_child[5][1] * edge, edge, level + 1);
-            children[6] = new octree(points, new_indices, new_index_count, min + parent_to_child[6][0] * edge, max + parent_to_child[6][1] * edge, edge, level + 1);
-            children[7] = new octree(points, new_indices, new_index_count, min + parent_to_child[7][0] * edge, max + parent_to_child[7][1] * edge, edge, level + 1);
-
-        }
-        else {
-            //printf("\troot node\n");
-            children = NULL;
-        }
-    }
-
-    void get_node_count(int* count, int* childless, int* leaf) {
-        (*count) += 1;
-        if (children != NULL) {
-            for (int i = 0; i < 8; i++) {
-                children[i]->get_node_count(count, childless, leaf);
-            }
-        }
-        else {
-            if (mass == 0.0) {
-                (*childless) += 1;
-            }
-            else {
-                (*leaf) += 1;
-            }
-        }
-    }
-};
-
-
-//functions
-void octree_shell_recursive(float* vertices, int* indices, int* vertex_index, int* index_index, octree* node, vec3 min, vec3 max, float edge) {
-    if (node->children != NULL) {
-        int vertex_increment = 0;
-        edge *= 0.5;
-
-        vec3 center = (max + min) * 0.5;
-        //face centers
-        for (int i = 0; i < 30; i++) {
-            //printf("vertex: %d, index: %d, edge: %d\n", *vertex_index / 3, *index_index, (*vertex_index / 3) + octree_indices[i]);
-            indices[(*index_index)++] = (*vertex_index / 3) + octree_indices[i];
-        }
-        for (int i = 0; i < 18; i++) {
-            vertices[(*vertex_index)++] = center.x + octree_vertices[vertex_increment].x * edge;
-            vertices[(*vertex_index)++] = center.y + octree_vertices[vertex_increment].y * edge;
-            vertices[(*vertex_index)++] = center.z + octree_vertices[vertex_increment].z * edge;
-            vertex_increment++;
-        }
-        //printf("\n\n");
-
-        octree_shell_recursive(vertices, indices, vertex_index, index_index, node->children[0], min + parent_to_child[0][0] * edge, max + parent_to_child[0][1] * edge, edge);
-        octree_shell_recursive(vertices, indices, vertex_index, index_index, node->children[1], min + parent_to_child[1][0] * edge, max + parent_to_child[1][1] * edge, edge);
-        octree_shell_recursive(vertices, indices, vertex_index, index_index, node->children[2], min + parent_to_child[2][0] * edge, max + parent_to_child[2][1] * edge, edge);
-        octree_shell_recursive(vertices, indices, vertex_index, index_index, node->children[3], min + parent_to_child[3][0] * edge, max + parent_to_child[3][1] * edge, edge);
-        octree_shell_recursive(vertices, indices, vertex_index, index_index, node->children[4], min + parent_to_child[4][0] * edge, max + parent_to_child[4][1] * edge, edge);
-        octree_shell_recursive(vertices, indices, vertex_index, index_index, node->children[5], min + parent_to_child[5][0] * edge, max + parent_to_child[5][1] * edge, edge);
-        octree_shell_recursive(vertices, indices, vertex_index, index_index, node->children[6], min + parent_to_child[6][0] * edge, max + parent_to_child[6][1] * edge, edge);
-        octree_shell_recursive(vertices, indices, vertex_index, index_index, node->children[7], min + parent_to_child[7][0] * edge, max + parent_to_child[7][1] * edge, edge);
-    }
-    else {
-        //printf("\tdead end\n");
-    }
-}
-lines generate_octree_shell(octree* tree) {
-    //count nodes
-    int node_count = 0;
-    int childless = 0;
-    int leaf = 0;
-    tree->get_node_count(&node_count, &childless, &leaf);
-
-    //this is the number of nodes which have children and therefore need an internal mesh
-    int applicable_node = node_count - childless - leaf;
-
-    //create vertex array
-    float* vertices = new float[3 * 18 * applicable_node];
-    int* indices = new int[(24 + 6) * applicable_node];
-    int vertex_index = 0;
-    int index_index = 0;
-    printf("estimated vertices: %d, estimated indices: %d\n", 18 * applicable_node, 30 * applicable_node);
-    octree_shell_recursive(vertices, indices, &vertex_index, &index_index, tree, vec3(-1.0), vec3(1.0), 2.0);
-    shader* simple_shader = new shader("vertex.vert", "fragment.frag");
-
-    return lines(vertices, 3 * 18 * applicable_node, indices, (24 + 6) * applicable_node, simple_shader);
-}
 vec2 normalize(vec2 vec) {
     float inv_length = 1.0 / vec.length();
     return vec2(vec.x * inv_length, vec.y * inv_length);
@@ -2466,7 +2335,7 @@ int main()
     //find the screen dimensions
     vec2 screen_dimensions = get_screen_dimensions();
     printf("Screen dimensions: %.0f x %.0f\n", screen_dimensions.x, screen_dimensions.y);
-    float fov = 2.0;//it is really important to remember that this is the vertical field of view
+    float fov = 1.0;//it is really important to remember that this is the vertical field of view
     float near_plane = 0.0025;
     float far_plane = 10.0;
     float aspect_ratio = SCR_WIDTH / SCR_HEIGHT;
@@ -2543,19 +2412,24 @@ int main()
     //shader pixel_group_shader("shaders/render_img.vert", "shaders/pixel_group.frag");
     //shader pixel_slide_shader("shaders/render_img.vert", "shaders/pixel_slide.frag");
     compute_shader build_kd_tree("shaders/kd_tree.comp");
+    compute_shader barnes_hut("shaders/barnes_hut.comp");
 
 
     shader octree_visualizer("shaders/octree_geometry.vert", "shaders/octree_frag.frag");
     shader kd_tree_visualizer("shaders/KD_tree.vert", "shaders/octree_frag.frag");
 
     compute_shader zCode_compute("shaders/morton_code.comp");
+    compute_shader morton_decode("shaders/morton_decode.comp");
 
     compute_shader sort_compute("shaders/sort.comp");
+    compute_shader prefix_sum("shaders/prefix_sum.comp");
 
     compute_shader octree_compute("shaders/voxel_generate.comp");
     compute_shader point_cloud_compute("shaders/point_cloud.comp");
     compute_shader octree_geometry("shaders/octree_geometry_generate.comp");
     compute_shader parametric_vol_comp("shaders/parametric_volume.comp");
+
+
     float s = 1.0;
     float quad_vertices[] = { -s, -s, 0.0, s, -s, 0.0, s, s, 0.0, -s, -s, 0.0, s, s, 0.0, -s, s, 0.0 };
     float cube[72 + 3 * 3 * 2];
@@ -2585,6 +2459,7 @@ int main()
 
 
     glPointSize(1);
+    glLineWidth(1);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_CONSTANT_ALPHA);
 
@@ -2679,19 +2554,53 @@ int main()
 
     //printf("atomic counter value: %d\n", voxel_counter.get_value());
 
-    int particle_count = 1024 * 8;
+    int particle_count = 1024 * 16;
 
-    N_BODY_SIM test_sim(particle_count, 0.1, &zCode_compute, &sort_compute, &octree_compute, &octree_geometry, &build_kd_tree, &voxel_counter);
-    test_sim.set_data_random(0);
+    N_BODY_SIM test_sim(particle_count, 0.1, &zCode_compute, &morton_decode, &sort_compute, &prefix_sum, &build_kd_tree, &barnes_hut);
+    //test_sim.set_data_random(0);
 
 
     test_sim.position_buffer.bind(GL_SHADER_STORAGE_BUFFER, 0);
+    test_sim.velocity_buffer.bind(GL_SHADER_STORAGE_BUFFER, 1);
     parametric_vol_comp.update_uniform_float(float(frame_count) / 15, "phase");
     parametric_vol_comp.compute((1 << int(ceil(log2(particle_count * 1.0) / 2))) / 32, (1 << int(floor(log2(particle_count * 1.0) / 2))) / 32, 1);
     test_sim.compute_cycle();
-    for (int i = 0; i < 100; i++) {
-        //test_sim.test_build();
-    }
+
+
+    /*
+        compute morton code using particle position vectors
+                            |
+                            |
+                            |
+                            V
+        sort morton codes bitonically
+                            |
+                            |
+                            |
+                            V
+        generate binary radix tree, flagging potential octree nodes
+                            |
+                            |
+                            |
+                            V
+        Perform an exclusive parallel prefix sum over the binary tree
+        such that each node flagged as new octree node is assigned
+        a unique index within the octee array. Don't bother reading the
+        number of nodes from the main thread, just use a cautious size
+        estimator to allocate the octree node buffer. Also this
+        new octree array won't be in breadth first order, therefore
+        each node will need 8 pointers to it's children. The upside of
+        this is that empty nodes don't need to be allocated.
+                            |
+                            |
+                            |
+                            V
+        scan through the radix tree and fill in the octree using data from the flagged nodes
+                            |
+                            |
+                            |
+                            V
+    */
 
 
     /*to do:
@@ -2719,17 +2628,32 @@ int main()
         * the octree geometry ssbo as an instance position array for a line mesh
         *
         * done | the sorting algorithm appears to be at least a cent portion of the total compute time.
-        * due almost entirely to global memory access latency, implement a section of the sorting algorithm which uses
-        * local memory sharing in the largest groups possible
+        *        due almost entirely to global memory access latency, implement a section of the sorting algorithm which uses
+        *        local memory sharing in the largest groups possible
         *
-        * fully parallel (full occupancy) octree construction using radix tree
+        * done | fully parallel (full occupancy) octree construction using radix tree
         *
-        *
+        * custom printing system and text search
+        * 
+        * execute force calculation in z-order to group similar tree traverals together
+        * 
     */
     glfwSwapInterval(1);
     while (!glfwWindowShouldClose(window))
     {
-        cameraPositionSpherical.x += 0.001;
+        //cameraPositionSpherical.x += 0.004;
+        if (keys[87] == GLFW_REPEAT || keys[87] == GLFW_PRESS) {
+            cameraPositionSpherical.y -= 0.01;
+        }
+        if (keys[83] == GLFW_REPEAT || keys[83] == GLFW_PRESS) {
+            cameraPositionSpherical.y += 0.01;
+        }
+        if (keys[65] == GLFW_REPEAT || keys[65] == GLFW_PRESS) {
+            cameraPositionSpherical.x -= 0.01;
+        }
+        if (keys[68] == GLFW_REPEAT || keys[68] == GLFW_PRESS) {
+            cameraPositionSpherical.x += 0.01;
+        }
         updateCamera(cameraPositionSpherical);
 
         glfwMakeContextCurrent(window);
@@ -2748,7 +2672,7 @@ int main()
 
         glBindFramebuffer(GL_FRAMEBUFFER, NULL);
 
-        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
         quad.material = &flat_shader;
         cubes.material->update_uniform_mat4(transformation_matrix, "transformationMatrix");
@@ -2761,8 +2685,9 @@ int main()
         //pixel_group_shader.update_uniform_ivec2(test_buffer_width, test_buffer_width, "resolution");
         //pixel_group_shader.update_uniform_int(2, "stride");
         cloud.draw_custom_instance_buffer(&test_sim.kd_tree);
-        cubes.draw();
+        //cubes.draw();
         //z_curve.draw((4 * frame_count) % point_cloud_points);
+        glViewport(SCR_WIDTH / 2, 0, SCR_WIDTH / 2, SCR_HEIGHT);
 
         render_point_cloud(&point_cloud_compute, &test_sim.position_buffer, &render_target, transformation_matrix, cameraPosition);
         //octree_shell.draw();
@@ -2781,11 +2706,10 @@ int main()
         frame_count++;
 
         test_sim.position_buffer.bind(GL_SHADER_STORAGE_BUFFER, 0);
-        parametric_vol_comp.update_uniform_float(float(frame_count) / 300, "phase");
-        parametric_vol_comp.compute( (1 << int(ceil(log2(particle_count * 1.0) / 2))) / 32, (1 << int(floor(log2(particle_count * 1.0) / 2))) / 32, 1);
+        parametric_vol_comp.update_uniform_float(float(frame_count) / 90, "phase");
+        //parametric_vol_comp.compute( (1 << int(ceil(log2(particle_count * 1.0) / 2))) / 32, (1 << int(floor(log2(particle_count * 1.0) / 2))) / 32, 1);
         //test_sim.set_data_random(frame_count);
         test_sim.compute_cycle();
-
 
     }
 
