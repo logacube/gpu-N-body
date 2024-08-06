@@ -5,11 +5,13 @@
 #define EMPTY 0xffffffffu
 
 struct node {
-    vec3 minimum;
     int child1;
-    vec3 maximum;
     int child2;
-    vec4 COM;//4th component is mass
+    int parent;
+    int flag;
+    vec4 COM;//4th component is mass;
+    vec4 minimum;//4th component is diagonal length
+    vec4 maximum;
 };
 layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
@@ -18,6 +20,10 @@ layout(std430, binding = 2) readonly buffer zCodeBuffer
     uint64_t zCode[];
 };
 
+layout(std430, binding = 3) buffer COMBuffer
+{
+    vec3 COM_CDF[];
+};
 layout(std430, binding = 5) buffer voxelBuffer
 {
     //the number of internal nodes in the radix tree will be 1 less than the size of the zCode array
@@ -25,7 +31,7 @@ layout(std430, binding = 5) buffer voxelBuffer
     node radix_tree[];
 };
 uniform uint invocation_limit;
-
+uniform int leaf_node_offset;
 
 //given a range of nodes, find the index of the most significant bit which differs between them
 int MSB(int left, int right) {
@@ -61,54 +67,6 @@ vec3 morton_decode(uint64_t M) {
     return vec3(float(x) / 2097152 - 0.5, float(y) / 2097152 - 0.5, float(z) / 2097152 - 0.5);
 }
 
-/*
-idea for allocating octree nodes at a per-level basis:
-
-while constructing the radix tree, if the number of shared bits is a multiple of 3 (including 0)
-then it will correspond to a unique octree node at that level.
-
-number in brackets are the common bits
-
-0000011 00 <------|         |        |       |      0
-                  |[0000]   |        |       |      |
-0000101 01 <------1         |        |       |      |
-                            |[000]   |       |      |
-0001000 02 <----------------2        |       |      |
-                                     |[00]   |      |
-0010000 03 <----------------3        |       |      |
-                            |[001]   |       |      |
-0011000 04 <------4         |        |       |      |
-                  |[0011]   |        |       |      |
-0011101 05 <--5   |         |        |       |      |
-              |   |         |        |       |      |
-0011110 06 <--|   |         |        6       |      |
-                                             |[0]   |
-0110110 07 <-------------------------7       |      |
-                                     |[01]   |      |
-0111110 08 <----------------8        |       |      |
-                            |[011]   |       |      |
-0111111 09 <----------------|        |       9      |
-                                                    | N/A
-1000000 10 <----------------|        |       10     |
-                            |[100]   |       |      |
-1000001 11 <----------------11       |       |      |
-                                     |[10]   |      |
-1010100 12 <------|         12       |       |      |
-                  |[10101]  |        |       |      |
-1010110 13 <------13        |        |       |      |
-                            |[101]   |       |      |
-1011101 14 <------14        |        |       |      |
-                  |[10111]  |        |       |      |
-1011101 15 <------|         |        15      |      |
-                                             |[1]   |
-1101011 16 <-------------------------16      |      |
-                                     |[11]   |      |
-1110011 17 <------|         17       |       |      |
-                  |[1110]   |[111]   |       |      |
-1110100 18 <------18        |        |       |      |
-                            |        |       |      |
-1111101 19 <----------------|        |       |      |
-*/
 void main() 
 {
 
@@ -175,14 +133,13 @@ void main()
     //the reason im subtracting 1 is because max range is obvisously too big
     //but we know half of it is still small enough, so subtracting 1 power of 2 
     //is neccesary 
-
-
+    
     for (int o = 1; o < findMSB(max_range) + 1; o++) {
         if (MSB(i, i + (range + (max_range >> o)) * d) < sibling_MSB) {
             range += max_range >> o;
         }
     }
-     
+    
     //get other bound
     int j = i + d * range;
 
@@ -194,33 +151,65 @@ void main()
     int split = 0;
 
 
-    
+               
     //the (range + 1) effectively just makes the devision (which is being emulated by but shifting)
     //round up simulating the ceil() of the result
-    int old = 0;
-    int q = 0;
-    for (int o = 1; o < findMSB(range); o++) {
-        q = MSB(i, i + (split + ((range + 1) >> o)) * d);
-        old = split;
-        if (MSB(i, i + (split + ((range + 1) >> o)) * d) < this_MSB) {
-            split += (range + 1) >> o;
+
+    //for future optimization, big2 can be replaced with max_width. it just needs to be a power of 2
+    int big_2 = 1 << (findMSB(range));
+    for (int o = 0; o < findMSB(range) + 1; o++) {
+    
+        if (MSB(i, i + (split + ((big_2) >> o)) * d) < this_MSB) {
+            split += (big_2 >> o);
         }
     }
-
+    
     //the reason min(d, 0) is here is because if the range is going "forward"
     //then the split where it needs to be, but if it is backwards, the index needs
     //to be shifted backwards by so that it has a 0 in the common MSB digit
     int split_index = i + split * d + min(d, 0);
-        
+      
     //these should be modified when the leaf node part of the 
     //node array is implemented. All this will really amount to
     //is adding some constant to the child indices corresponding
-    //to where the index of the first leaf node next to the last internal node
-    radix_tree[i].minimum = morton_decode(zCode[min(i, j)]);
-    radix_tree[i].maximum = morton_decode(zCode[max(i, j)]);
-    radix_tree[i].child1 = split_index;
-    radix_tree[i].child2 = split_index + 1;
+    if (min(i, j) == split_index) {
+        radix_tree[i].child1 = split_index + leaf_node_offset;
+        radix_tree[leaf_node_offset + split_index].COM = vec4(morton_decode(zCode[split_index]), 1.0);
+        radix_tree[leaf_node_offset + split_index].minimum.w = 8.25906185e-7;
+        radix_tree[leaf_node_offset + split_index].parent = i;
+        radix_tree[leaf_node_offset + split_index].flag = leaf_node_offset + split_index;
+    }
+    else {
+        radix_tree[i].child1 = split_index;
+        radix_tree[split_index].parent = i;
+    }
+    if (max(i, j) == split_index + 1) {
+        radix_tree[i].child2 = split_index + leaf_node_offset + 1;
+        radix_tree[leaf_node_offset + split_index + 1].COM = vec4(morton_decode(zCode[split_index + 1]), 1.0);
+        radix_tree[leaf_node_offset + split_index + 1].minimum.w = 8.25906185e-7;
+        radix_tree[leaf_node_offset + split_index + 1].parent = i;
+        radix_tree[leaf_node_offset + split_index + 1].flag = leaf_node_offset + split_index + 1;
 
+    }
+    else {
+        radix_tree[i].child2 = split_index + 1;
+        radix_tree[split_index + 1].parent = i;
+    }
+    float mass = float(range + 1);
+         
+    radix_tree[i].COM = vec4((COM_CDF[max(i, j)] - COM_CDF[max(min(i, j) - 1, 0)]) / mass, mass);
+    radix_tree[i].flag = i;
+    //assign children with pointers to this node
+
+      
+   
+    vec3 minimum =  morton_decode(zCode[min(i, j)] & (0x7ffffffffffffffful << this_MSB));
+    vec3 maximum =  morton_decode(zCode[max(i, j)] | (0x7ffffffffffffffful >> (63 - this_MSB)));
+    radix_tree[i].minimum.xyz = minimum;
+    radix_tree[i].maximum.xyz = maximum;
+    vec3 diagonal = maximum - minimum;
+    radix_tree[i].minimum.w = sqrt(dot(diagonal, diagonal));
+    //radix_tree[i].minimum.w = float(range);
 
     //finding bounding box by decoding morton codes of corners
 
@@ -232,29 +221,29 @@ void main()
         //the "final bits" are also the masks for each step
 
         start code:   0000000000000000000000000000000000000000000111111111111111111111
-        targed bits:  0000000000000000000000000000000000000000000111111100000000000000 1FC000
+        target bits:  0000000000000000000000000000000000000000000111111100000000000000 1FC000
         shifted bits: 0000000000000001111111000000000000000000000000000000000000000000 (x & 1FC000) << 28
         shifted all:  0000000000000001111111111111111111110000000000000000000000000000 x << 28
         final bits:   0000000000000001111111000000000000000000000000000011111111111111 1FC0000003FFF
 
         start code:   0000000000000001111111000000000000000000000000000011111111111111
-        targed bits:  0000000000000000000000000000000000000000000000000011111110000000
+        target bits:  0000000000000000000000000000000000000000000000000011111110000000
         shifted bits: 0000000000000000000000000000000000001111111000000000000000000000
         shifted all:  0111111100000000000000000000000000001111111111111100000000000000 x << 14
         final bits:   0000000000000001111111000000000000001111111000000000000001111111 1FC000FE0007F
 
         start code:   0000000000000001111111000000000000001111111000000000000001111111
-        targed bits:  0000000000000001110000000000000000001110000000000000000001110000
+        target bits:  0000000000000001110000000000000000001110000000000000000001110000
         shifted bits: 0000000111000000000000000000111000000000000000000111000000000000 x << 8
         final bits:   0000000111000000001111000000111000000001111000000111000000001111 1C03C0E01E0700F
         
         start code:   0000000111000000001111000000111000000001111000000111000000001111
-        targed bits:  0000000100000000001100000000100000000001100000000100000000001100
+        target bits:  0000000100000000001100000000100000000001100000000100000000001100
         shifted bits: 0001000000000011000000001000000000011000000001000000000011000000 x << 4
         final bits:   0001000011000011000011001000011000011000011001000011000011000011 10C30C86186430C3
        
         start code:   0001000011000011000011001000011000011000011001000011000011000011
-        targed bits:  0000000010000010000010000000010000010000010000000010000010000010
+        target bits:  0000000010000010000010000000010000010000010000000010000010000010
         shifted bits: 0000001000001000001000000001000001000001000000001000001000001000 x << 2
         shifted all:  0100001100001100001100100001100001100001100100001100001100001100
         final bits:   0001001001001001001001001001001001001001001001001001001001001001 1249249249249249
@@ -264,18 +253,18 @@ void main()
 
         decode:
         start code:   0001001001001001001001001001001001001001001001001001001001001001
-        targed bits:  0000001000001000001000000001000001000001000000001000001000001000
+        target bits:  0000001000001000001000000001000001000001000000001000001000001000
         shifted bits: 0000000010000010000010000000010000010000010000000010000010000010 >> 2
         shifted all:  0000010010010010010010010010010010010010010010010010010010010010 >> 2
         final bits:   0001000011000011000011001000011000011000011001000011000011000011 10C30C86186430C3
    
         start code:   0001000011000011000011001000011000011000011001000011000011000011
-        targed bits:  0001000000000011000000001000000000011000000001000000000011000000
+        target bits:  0001000000000011000000001000000000011000000001000000000011000000
         shifted bits: 0000000100000000001100000000100000000001100000000100000000001100 >> 4
         final bits:   0000000111000000001111000000111000000001111000000111000000001111 1C03C0E01E0700F
 
         start code:   0000000111000000001111000000111000000001111000000111000000001111
-        targed bits:  0000000111000000000000000000111000000000000000000111000000000000
+        target bits:  0000000111000000000000000000111000000000000000000111000000000000
         shifted bits: 0000000000000001110000000000000000001110000000000000000001110000 >> 4
         final bits:   0000000000000001111111000000000000001111111000000000000001111111 1FC000FE0007F
     
@@ -283,45 +272,53 @@ void main()
 
     Binary tree to octree (fucking around and hopefully finding out): 
 
-0000011 00 <------|         |        |       |      0
-                  |[0000]   |        |       |      |
-0000101 01 <------1         |        |       |      |
-                            |[000]   |       |      |
-0001000 02 <----------------2        |       |      |
-                                     |[00]   |      |
-0010000 03 <----------------3        |       |      |
-                            |[001]   |       |      |
-0011000 04 <------4         |        |       |      |
-                  |[0011]   |        |       |      |
-0011101 05 <--5   |         |        |       |      |
-              |   |         |        |       |      |
-0011110 06 <--|   |         |        6       |      |
-                                             |[0]   |
-0110110 07 <-------------------------7       |      |
-                                     |[01]   |      |
-0111110 08 <----------------8        |       |      |
-                            |[011]   |       |      |
-0111111 09 <----------------|        |       9      |
-                                                    | N/A
-1000000 10 <----------------|        |       10     |
-                            |[100]   |       |      |
-1000001 11 <----------------11       |       |      |
-                                     |[10]   |      |
-1010100 12 <------|         12       |       |      |
-                  |[10101]  |        |       |      |
-1010110 13 <------13        |        |       |      |
-                            |[101]   |       |      |
-1011101 14 <------14        |        |       |      |
-                  |[10111]  |        |       |      |
-1011101 15 <------|         |        15      |      |
-                                             |[1]   |
-1101011 16 <-------------------------16      |      |
-                                     |[11]   |      |
-1110011 17 <------|         17       |       |      |
-                  |[1110]   |[111]   |       |      |
-1110100 18 <------18        |        |       |      |
-                            |        |       |      |
-1111101 19 <----------------|        |       |      |
+0000011 00 <----------------|              |             |            |           0
+                            |[0000]        |             |            |           |
+0000101 01 <----------------1--------------|             |            |           |
+                                           |[000] [!]    |            |           |
+0001000 02 <-------------------------------2-------------|            |           |
+                                                         |[00]        |           |
+0010000 03 <-------------------------------3-------------|            |           |
+                                           |[001] [!]    |            |           |
+0011000 04 <----------------4--------------|             |            |           |
+                            |[0011]        |             |            |           |
+0011101 05 <--5-------------|              |             |            |           |
+              |[00111]      |              |             |            |           |
+0011110 06 <--|             |              |             6------------|           |
+                                                                      |[0]        |
+0110110 07 <---------------------------------------------7------------|           |
+                                                         |[01]        |           |
+0111110 08 <-------------------------------8-------------|            |           |
+                                           |[011] [!]    |            |           |
+0111111 09 <-------------------------------|             |            9-----------|
+                                                                                  | N/A [!]
+1000000 10 <-------------------------------|             |            10----------| 
+                                           |[100] [!]    |            |           |
+1000001 11 <-------------------------------11------------|            |           |
+                                                         |[10]        |           |
+1010100 12 <----------------|              12------------|            |           |
+                            |[10101]       |             |            |           |
+1010110 13 <----------------13-------------|             |            |           |
+                                           |[101] [!]    |            |           |
+1011101 14 <----------------14-------------|             |            |           |
+                            |[10111]       |             |            |           |
+1011101 15 <----------------|              |             15-----------|           |
+                                                                      |[1]        |
+1101011 16 <---------------------------------------------16-----------|           |
+                                                         |[11]        |           |
+1110011 17 <----------------|              17------------|            |           |
+                            |[11101]       |[1110] [!]   |            |           |
+1110100 18 <----------------18-------------|             |            |           |
+                                           |             |            |           |
+1110101 19 <-------------------------------|             |            |           |
     
+
+
+
+
+
+
+
+
     */
 }
